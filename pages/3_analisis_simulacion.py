@@ -95,6 +95,39 @@ def calc_sharpe(tickers, weights_dict, mean_ret, cov):
     v = float(np.sqrt(w @ cov.loc[avail, avail].values @ w))
     return (round(r / v, 2) if v > 0 else None), round(r, 4), round(v, 4)
 
+def save_decision(operations, period, predicted_return, predicted_vol,
+                  predicted_sharpe, cash_invested, notes):
+    """Guarda una decisión de inversión en decisions.csv."""
+    try:
+        df = pd.read_csv("data/decisions.csv")
+    except (FileNotFoundError, pd.errors.EmptyDataError):
+        df = pd.DataFrame(columns=[
+            "id","date","operations","period",
+            "predicted_return","predicted_vol","predicted_sharpe",
+            "cash_invested","notes",
+            "actual_return","actual_vol","actual_sharpe","review_date"
+        ])
+
+    new_id  = int(df["id"].max() + 1) if not df.empty else 1
+    new_row = pd.DataFrame([{
+        "id":               new_id,
+        "date":             pd.Timestamp.now().strftime("%Y-%m-%d"),
+        "operations":       operations,
+        "period":           period,
+        "predicted_return": round(predicted_return, 4),
+        "predicted_vol":    round(predicted_vol, 4),
+        "predicted_sharpe": round(predicted_sharpe, 2),
+        "cash_invested":    round(abs(cash_invested), 2),
+        "notes":            notes,
+        "actual_return":    None,
+        "actual_vol":       None,
+        "actual_sharpe":    None,
+        "review_date":      None,
+    }])
+
+    updated = pd.concat([df, new_row], ignore_index=True)
+    updated.to_csv("data/decisions.csv", index=False)
+
 
 # ── CARGA INICIAL ──────────────────────────────────────────────────────────────
 
@@ -183,7 +216,6 @@ if has_trades:
     sim_df, cash_net = apply_trades(positions, prices, st.session_state.trades_sim)
     simulated        = calc_portfolio(sim_df, prices)
 
-# Una sola descarga histórica para toda la página
 history = get_price_history(all_tickers, period)
 if history.empty:
     st.error("No se pudieron descargar datos históricos. Inténtalo de nuevo.")
@@ -424,3 +456,45 @@ if not changed.empty:
     st.pyplot(fig2)
 else:
     st.info("Las operaciones no producen cambios significativos en la asignación.")
+
+st.divider()
+
+
+# ── 6. GUARDAR DECISIÓN ────────────────────────────────────────────────────────
+
+st.subheader("💾 Guardar esta decisión en el diario")
+st.caption("Guarda la predicción actual para compararla con la realidad en el futuro.")
+
+if sim_sharpe and sim_r and sim_v:
+    ops_label = " · ".join([
+        f"{'Comprar' if t['action']=='buy' else 'Vender'} "
+        f"{t['ticker']} "
+        f"{'$'+str(int(t['amount'])) if t['mode']=='dollars' else str(t['amount'])+'acc'}"
+        for t in st.session_state.trades_sim
+    ])
+
+    decision_note = st.text_area(
+        "Tesis de inversión (¿por qué tomas esta decisión?)",
+        placeholder="Ej: Refuerzo JNJ porque el modelo lo señala como el activo más eficiente. "
+                    "Añado XLE para diversificar en energía. Objetivo: mejorar Sharpe de 2.30 a 2.51.",
+        height=100
+    )
+
+    col_metrics = st.columns(3)
+    col_metrics[0].metric("Sharpe predicho",   f"{sim_sharpe:.2f}")
+    col_metrics[1].metric("Retorno predicho",  f"{sim_r:.1%}")
+    col_metrics[2].metric("Volatilidad pred.", f"{sim_v:.1%}")
+
+    if st.button("💾 Guardar decisión en el diario"):
+        save_decision(
+            operations       = ops_label,
+            period           = period,
+            predicted_return = sim_r,
+            predicted_vol    = sim_v,
+            predicted_sharpe = sim_sharpe,
+            cash_invested    = cash_net,
+            notes            = decision_note,
+        )
+        st.success("✅ Decisión guardada. Ve a '📓 Diario de decisiones' para verla.")
+else:
+    st.info("Añade operaciones en la cola para activar el guardado de decisiones.")

@@ -76,12 +76,12 @@ def redistribute(changed_t):
         for x in ticker_list
         if st.session_state.get(f"lock_{x}", False) and x != changed_t
     )
-    available  = max(0.0, 1.0 - locked_sum)
-    new_val    = min(new_val, available)
-    others     = [x for x in ticker_list
-                  if not st.session_state.get(f"lock_{x}", False) and x != changed_t]
-    others_sum = sum(st.session_state[f"s_{x}"] / 100.0 for x in others)
-    remaining  = available - new_val
+    available_w = max(0.0, 1.0 - locked_sum)
+    new_val     = min(new_val, available_w)
+    others      = [x for x in ticker_list
+                   if not st.session_state.get(f"lock_{x}", False) and x != changed_t]
+    others_sum  = sum(st.session_state[f"s_{x}"] / 100.0 for x in others)
+    remaining   = available_w - new_val
     st.session_state[f"s_{changed_t}"] = round(new_val * 100, 1)
     if others:
         if others_sum > 0.001:
@@ -159,15 +159,28 @@ log_returns  = np.log(raw / raw.shift(1)).dropna()
 mean_returns = log_returns.mean() * 252
 cov_matrix   = log_returns.cov()   * 252
 
+# CORRECCIÓN: yfinance devuelve columnas en orden alfabético, no en orden del CSV.
+# Siempre reordenamos por ticker_list para garantizar alineación correcta.
+available = [t for t in ticker_list if t in mean_returns.index]
+mr = mean_returns[available]               # Serie reordenada por ticker_list
+cm = cov_matrix.loc[available, available]  # Matriz reordenada por ticker_list
+
+# Pesos reales e hipotéticos en el mismo orden que available
+aw = np.array([actual_weights[ticker_list.index(t)] for t in available])
+aw = aw / aw.sum()
+hw = np.array([hypo_weights[ticker_list.index(t)] for t in available])
+hw = hw / hw.sum()
+
 
 # ── ESTADÍSTICAS DE PORTFOLIOS ─────────────────────────────────────────────────
+# mr y cm.values garantizan alineación ticker a ticker
 
-act_r = np.dot(actual_weights, mean_returns)
-act_v = np.sqrt(actual_weights @ cov_matrix.values @ actual_weights)
+act_r = float(np.dot(aw, mr))
+act_v = float(np.sqrt(aw @ cm.values @ aw))
 act_s = act_r / act_v
 
-hyp_r = np.dot(hypo_weights, mean_returns)
-hyp_v = np.sqrt(hypo_weights @ cov_matrix.values @ hypo_weights)
+hyp_r = float(np.dot(hw, mr))
+hyp_v = float(np.sqrt(hw @ cm.values @ hw))
 hyp_s = hyp_r / hyp_v
 
 
@@ -175,9 +188,9 @@ hyp_s = hyp_r / hyp_v
 
 all_w_mc, port_r, port_v, port_s = [], [], [], []
 for _ in range(n_portfolios):
-    w = np.random.dirichlet(np.ones(len(ticker_list)))
-    r = np.dot(w, mean_returns)
-    v = np.sqrt(w @ cov_matrix.values @ w)
+    w = np.random.dirichlet(np.ones(len(available)))
+    r = float(np.dot(w, mr))
+    v = float(np.sqrt(w @ cm.values @ w))
     all_w_mc.append(w); port_r.append(r); port_v.append(v); port_s.append(r / v)
 
 port_r     = np.array(port_r)
@@ -189,11 +202,11 @@ minvol_idx = int(np.argmin(port_v))
 # ── SCIPY: PESOS ÓPTIMOS EXACTOS ──────────────────────────────────────────────
 
 def neg_sharpe_opt(w):
-    r = np.dot(w, mean_returns)
-    v = np.sqrt(w @ cov_matrix.values @ w)
+    r = float(np.dot(w, mr))
+    v = float(np.sqrt(w @ cm.values @ w))
     return -(r / v)
 
-n_ast   = len(ticker_list)
+n_ast   = len(available)
 opt_res = minimize(
     neg_sharpe_opt,
     x0          = np.ones(n_ast) / n_ast,
@@ -202,8 +215,8 @@ opt_res = minimize(
     constraints = {"type": "eq", "fun": lambda w: np.sum(w) - 1}
 )
 best_w_scipy = opt_res.x if opt_res.success else np.ones(n_ast) / n_ast
-opt_r_scipy  = np.dot(best_w_scipy, mean_returns)
-opt_v_scipy  = np.sqrt(best_w_scipy @ cov_matrix.values @ best_w_scipy)
+opt_r_scipy  = float(np.dot(best_w_scipy, mr))
+opt_v_scipy  = float(np.sqrt(best_w_scipy @ cm.values @ best_w_scipy))
 opt_s_scipy  = opt_r_scipy / opt_v_scipy
 
 
@@ -304,12 +317,16 @@ st.caption(
     "Referencia orientativa — los retornos pasados no garantizan resultados futuros."
 )
 
+aw_map = {t: actual_weights[ticker_list.index(t)] for t in available}
+hw_map = {t: hypo_weights[ticker_list.index(t)]   for t in available}
+
 opt_df = pd.DataFrame({
-    "Ticker":              ticker_list,
-    "Peso actual (%)":     (actual_weights  * 100).round(1),
-    "Peso hipotético (%)": (hypo_weights    * 100).round(1),
-    "Peso óptimo (%)":     (best_w_scipy    * 100).round(1),
-    "vs Actual (pp)":      ((best_w_scipy - actual_weights) * 100).round(1),
+    "Ticker":              available,
+    "Peso actual (%)":     [round(aw_map[t] * 100, 1) for t in available],
+    "Peso hipotético (%)": [round(hw_map[t] * 100, 1) for t in available],
+    "Peso óptimo (%)":     (best_w_scipy * 100).round(1),
+    "vs Actual (pp)":      [round(w * 100 - aw_map[t] * 100, 1)
+                            for t, w in zip(available, best_w_scipy)],
 }).sort_values("Peso óptimo (%)", ascending=False)
 
 st.dataframe(opt_df, use_container_width=True, hide_index=True)

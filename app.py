@@ -22,11 +22,13 @@ def save_positions(df):
 
 def load_snapshots():
     try:
-        df = pd.read_csv("data/snapshots.csv", parse_dates=["date"])
+        df = pd.read_csv("data/snapshots.csv")
+        df["date"] = pd.to_datetime(df["date"])
         return df.sort_values("date").reset_index(drop=True)
     except (FileNotFoundError, pd.errors.EmptyDataError):
         return pd.DataFrame(
-            columns=["date","total_value","total_invested","total_pl","total_pl_pct","notes"])
+            columns=["date","total_value","total_invested",
+                     "total_pl","total_pl_pct","notes"])
 
 def save_snapshot(total_value, total_invested, total_pl, total_pl_pct, notes=""):
     snapshots = load_snapshots()
