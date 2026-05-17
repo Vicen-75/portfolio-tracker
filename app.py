@@ -9,30 +9,28 @@ from datetime import date
 st.set_page_config(page_title="Portfolio Tracker", page_icon="📈", layout="wide")
 
 
-# ── CLASIFICACIÓN DE TICKERS ───────────────────────────────────────────────────
-# Fuente única de clasificación. Añade aquí cualquier ticker nuevo.
+# ── CLASIFICACIÓN ──────────────────────────────────────────────────────────────
 
 CLASSIFICATION = {
-    "ASML":  {"asset_class": "Equity", "sector": "Technology",           "industry": "Semiconductor Equipment"},
+    "ASML":  {"asset_class": "Equity", "sector": "Technology",           "industry": "Semiconductor Eq."},
     "QQQ":   {"asset_class": "ETF",    "sector": "Technology",           "industry": "Nasdaq 100"},
     "VOO":   {"asset_class": "ETF",    "sector": "Broad Market",         "industry": "S&P 500"},
     "TSM":   {"asset_class": "Equity", "sector": "Technology",           "industry": "Semiconductors"},
-    "JNJ":   {"asset_class": "Equity", "sector": "Healthcare",           "industry": "Pharmaceuticals"},
+    "JNJ":   {"asset_class": "Equity", "sector": "Healthcare",           "industry": "Pharma."},
     "NVDA":  {"asset_class": "Equity", "sector": "Technology",           "industry": "Semiconductors"},
     "WPM":   {"asset_class": "Equity", "sector": "Basic Materials",      "industry": "Precious Metals"},
     "VXUS":  {"asset_class": "ETF",    "sector": "International Equity", "industry": "Global ex-US"},
-    "SBGSY": {"asset_class": "Equity", "sector": "Industrial",           "industry": "Electrical Equipment"},
+    "SBGSY": {"asset_class": "Equity", "sector": "Industrial",           "industry": "Electrical Eq."},
     "VEA":   {"asset_class": "ETF",    "sector": "International Equity", "industry": "Developed Markets"},
     "BND":   {"asset_class": "ETF",    "sector": "Fixed Income",         "industry": "Gov & Corp Bonds"},
     "VWO":   {"asset_class": "ETF",    "sector": "International Equity", "industry": "Emerging Markets"},
-    "PG":    {"asset_class": "Equity", "sector": "Consumer",             "industry": "Consumer Staples"},
+    "PG":    {"asset_class": "Equity", "sector": "Consumer",             "industry": "Staples"},
     "JPM":   {"asset_class": "Equity", "sector": "Financial",            "industry": "Banks"},
-    "NVO":   {"asset_class": "Equity", "sector": "Healthcare",           "industry": "Pharmaceuticals"},
-    "LLY":   {"asset_class": "Equity", "sector": "Healthcare",           "industry": "Pharmaceuticals"},
+    "NVO":   {"asset_class": "Equity", "sector": "Healthcare",           "industry": "Pharma."},
+    "LLY":   {"asset_class": "Equity", "sector": "Healthcare",           "industry": "Pharma."},
     "XLE":   {"asset_class": "ETF",    "sector": "Energy",               "industry": "Energy Sector"},
 }
 
-# Paleta de colores por sector
 SECTOR_COLORS = {
     "Technology":           "#534AB7",
     "Healthcare":           "#D4537E",
@@ -46,6 +44,24 @@ SECTOR_COLORS = {
     "Broad Market":         "#43A047",
     "Other":                "#BDBDBD",
 }
+ASSET_COLORS = {"ETF": "#185FA5", "Equity": "#534AB7"}
+INDUSTRY_COLORS = {
+    "Semiconductor Eq.": "#7C4DFF",
+    "Nasdaq 100":         "#3D5AFE",
+    "S&P 500":            "#43A047",
+    "Semiconductors":     "#651FFF",
+    "Pharma.":            "#E91E63",
+    "Precious Metals":    "#FFB300",
+    "Global ex-US":       "#1565C0",
+    "Electrical Eq.":     "#546E7A",
+    "Developed Markets":  "#1976D2",
+    "Gov & Corp Bonds":   "#78909C",
+    "Emerging Markets":   "#0288D1",
+    "Staples":            "#00897B",
+    "Banks":              "#455A64",
+    "Energy Sector":      "#F57C00",
+    "Other":              "#BDBDBD",
+}
 
 
 # ── FUNCIONES ──────────────────────────────────────────────────────────────────
@@ -58,7 +74,6 @@ def load_positions():
             "ticker","shares","avg_price","date_added","category",
             "asset_class","sector","industry"
         ])
-    # Aplicar clasificación desde el dict para tickers conocidos
     for col, key in [("asset_class","asset_class"),("sector","sector"),("industry","industry")]:
         if col not in df.columns:
             df[col] = df["ticker"].map(lambda t: CLASSIFICATION.get(t, {}).get(key, "Other"))
@@ -143,7 +158,7 @@ total_pl_pct   = total_pl / total_invested * 100
 n_winners      = int((positions["pl_usd"] > 0).sum())
 
 
-# ── HEADER ─────────────────────────────────────────────────────────────────────
+# ── 1. HEADER Y MÉTRICAS ───────────────────────────────────────────────────────
 
 st.title("📈 Portfolio Tracker")
 st.caption(
@@ -160,8 +175,107 @@ c4.metric("Posiciones ganadoras",  f"{n_winners} / {len(positions)}")
 st.divider()
 
 
-# ── RETORNOS ACUMULADOS (PLOTLY) ───────────────────────────────────────────────
-# Posición: justo después de las métricas, antes de la tabla
+# ── 2. ASIGNACIÓN DEL PORTFOLIO — 3 DONUTS ────────────────────────────────────
+
+st.subheader("Asignación del portfolio")
+
+def pie_colors(labels, color_map):
+    return [color_map.get(l, "#BDBDBD") for l in labels]
+
+fig_alloc = make_subplots(
+    rows=1, cols=3,
+    specs=[[{"type":"pie"},{"type":"pie"},{"type":"pie"}]],
+    subplot_titles=["Asset Class", "Sector", "Industry"]
+)
+
+for col_idx, (group_col, cmap) in enumerate([
+    ("asset_class", ASSET_COLORS),
+    ("sector",      SECTOR_COLORS),
+    ("industry",    INDUSTRY_COLORS),
+], start=1):
+    grp = positions.groupby(group_col)["market_value"].sum().reset_index()
+    grp.columns = ["label","value"]
+    fig_alloc.add_trace(
+        go.Pie(
+            labels              = grp["label"],
+            values              = grp["value"].round(0),
+            hole                = 0.38,
+            marker              = dict(colors=pie_colors(grp["label"].tolist(), cmap)),
+            textinfo            = "label+percent",   # muestra texto solo si cabe
+            textposition        = "inside",
+            insidetextanchor    = "middle",
+            texttemplate        = "%{label}<br>%{percent:.0%}",
+            showlegend          = False,              # sin leyenda
+            hovertemplate       = (
+                "<b>%{label}</b><br>"
+                "$%{value:,.0f} · %{percent:.1%}"
+                "<extra></extra>"
+            ),
+        ),
+        row=1, col=col_idx
+    )
+
+fig_alloc.update_layout(
+    height  = 340,
+    margin  = dict(l=10, r=10, t=50, b=10),
+)
+st.plotly_chart(fig_alloc, use_container_width=True)
+
+st.divider()
+
+
+# ── 3. TABLA DE POSICIONES ────────────────────────────────────────────────────
+
+st.subheader("Posiciones")
+
+table = positions[[
+    "ticker","asset_class","sector","industry",
+    "shares","current_price","market_value","cost_basis","pl_usd","pl_pct","weight"
+]].sort_values("pl_usd", ascending=False).copy()
+table.columns = [
+    "Ticker","Class","Sector","Industry",
+    "Acc.","Precio","Valor","Costo","P&L $","P&L %","Peso %"
+]
+
+def color_pl(val):
+    if isinstance(val, float) and val > 0:  return "color: green"
+    elif isinstance(val, float) and val < 0: return "color: red"
+    return ""
+
+st.dataframe(
+    table.style
+        .format({
+            "Acc.":   "{:.3f}",
+            "Precio": "${:.2f}",
+            "Valor":  "${:.0f}",
+            "Costo":  "${:.0f}",
+            "P&L $":  "${:+.0f}",
+            "P&L %":  "{:+.1f}%",
+            "Peso %": "{:.1f}%",
+        })
+        .map(color_pl, subset=["P&L $","P&L %"]),
+    column_config={
+        "Ticker":   st.column_config.TextColumn("Ticker"),
+        "Class":    st.column_config.TextColumn("Class"),
+        "Sector":   st.column_config.TextColumn("Sector"),
+        "Industry": st.column_config.TextColumn("Industry"),
+        "Acc.":     st.column_config.TextColumn("Acc."),
+        "Precio":   st.column_config.TextColumn("Precio"),
+        "Valor":    st.column_config.TextColumn("Valor"),
+        "Costo":    st.column_config.TextColumn("Costo"),
+        "P&L $":    st.column_config.TextColumn("P&L $"),
+        "P&L %":    st.column_config.TextColumn("P&L %"),
+        "Peso %":   st.column_config.TextColumn("Peso %"),
+    },
+    use_container_width=True,
+    hide_index=True,
+    height=560
+)
+
+st.divider()
+
+
+# ── 4. RETORNOS ACUMULADOS (PLOTLY) ───────────────────────────────────────────
 
 st.subheader("Retornos acumulados (1 año)")
 
@@ -170,48 +284,53 @@ history = get_price_history(tickers)
 if not history.empty:
     cum = (history / history.iloc[0] - 1) * 100
 
-    # ── Filtros por clasificación ──────────────────────────────────────────────
-    f1, f2, f3, f4 = st.columns([1, 1, 1, 1])
-    with f1:
-        view = st.radio("Vista", ["Individual","Por categoría"],
-                        horizontal=True, label_visibility="collapsed")
-    with f2:
-        sel_class = st.multiselect(
-            "Asset Class",
-            sorted(positions["asset_class"].unique()),
-            default=sorted(positions["asset_class"].unique()),
-            label_visibility="collapsed",
-            placeholder="Asset Class…"
-        )
-    with f3:
-        sel_sector = st.multiselect(
-            "Sector",
-            sorted(positions["sector"].unique()),
-            default=sorted(positions["sector"].unique()),
-            label_visibility="collapsed",
-            placeholder="Sector…"
-        )
-    with f4:
-        sel_industry = st.multiselect(
-            "Industry",
-            sorted(positions["industry"].unique()),
-            default=sorted(positions["industry"].unique()),
-            label_visibility="collapsed",
-            placeholder="Industry…"
+    # ── Controles: vista + filtros en expander ──────────────────────────────────
+    ctrl_left, ctrl_right = st.columns([2, 4])
+    with ctrl_left:
+        view = st.radio(
+            "Vista",
+            ["Individual", "Por categoría"],
+            horizontal=True,
+            label_visibility="collapsed"
         )
 
-    # Tickers filtrados
+    # Filtros dentro de expander — no ocupan espacio fijo
+    with st.expander("🔍 Filtrar por clasificación", expanded=False):
+        fa, fb, fc = st.columns(3)
+        with fa:
+            sel_class = st.multiselect(
+                "Asset Class",
+                sorted(positions["asset_class"].unique()),
+                default=sorted(positions["asset_class"].unique()),
+            )
+        with fb:
+            sel_sector = st.multiselect(
+                "Sector",
+                sorted(positions["sector"].unique()),
+                default=sorted(positions["sector"].unique()),
+            )
+        with fc:
+            sel_industry = st.multiselect(
+                "Industry",
+                sorted(positions["industry"].unique()),
+                default=sorted(positions["industry"].unique()),
+            )
+    # Si el expander nunca se abre, usar todos por defecto
+    if "sel_class"    not in dir(): sel_class    = sorted(positions["asset_class"].unique())
+    if "sel_sector"   not in dir(): sel_sector   = sorted(positions["sector"].unique())
+    if "sel_industry" not in dir(): sel_industry = sorted(positions["industry"].unique())
+
     mask = (
         positions["asset_class"].isin(sel_class) &
         positions["sector"].isin(sel_sector) &
         positions["industry"].isin(sel_industry)
     )
-    filtered_tickers = positions[mask]["ticker"].tolist()
+    filtered_pos = positions[mask]
 
     fig_cum = go.Figure()
 
     if view == "Individual":
-        for _, pos_row in positions[mask].iterrows():
+        for _, pos_row in filtered_pos.iterrows():
             t     = pos_row["ticker"]
             color = SECTOR_COLORS.get(pos_row["sector"], "#888")
             if t in cum.columns:
@@ -227,9 +346,8 @@ if not history.empty:
                     )
                 ))
     else:
-        # Retorno medio por sector (de los tickers filtrados)
-        for sector in sorted(positions[mask]["sector"].unique()):
-            tickers_in = positions[mask & (positions["sector"] == sector)]["ticker"].tolist()
+        for sector in sorted(filtered_pos["sector"].unique()):
+            tickers_in = filtered_pos[filtered_pos["sector"] == sector]["ticker"].tolist()
             tickers_in = [t for t in tickers_in if t in cum.columns]
             if tickers_in:
                 avg = cum[tickers_in].mean(axis=1).round(2)
@@ -244,9 +362,9 @@ if not history.empty:
                     )
                 ))
 
-    # ── Línea del portfolio total (siempre visible) ────────────────────────────
-    total_mv   = positions["market_value"].sum()
-    port_cum   = pd.Series(0.0, index=history.index)
+    # Línea del portfolio total (siempre visible, naranja gruesa)
+    total_mv  = positions["market_value"].sum()
+    port_cum  = pd.Series(0.0, index=history.index)
     for _, row in positions.iterrows():
         t = row["ticker"]
         if t in cum.columns:
@@ -255,9 +373,9 @@ if not history.empty:
     fig_cum.add_trace(go.Scatter(
         x    = port_cum.index,
         y    = port_cum.round(2),
-        name = "📊 Portfolio total",
+        name = "📊 Portfolio",
         mode = "lines",
-        line = dict(color="#FF6B35", width=4, dash="solid"),
+        line = dict(color="#FF6B35", width=4),
         hovertemplate=(
             "<b>Portfolio total</b><br>"
             "%{x|%d %b %Y}<br><b>%{y:.1f}%</b><extra></extra>"
@@ -279,162 +397,60 @@ if not history.empty:
         yaxis=dict(title="Retorno (%)"),
         hovermode="x unified",
         height=460,
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(size=10)),
-        margin=dict(l=50, r=20, t=80, b=50),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom", y=1.02,
+            xanchor="right",  x=1,
+            font=dict(size=10),
+            bgcolor="rgba(0,0,0,0)",   # fondo transparente = más discreto
+        ),
+        margin=dict(l=50, r=20, t=70, b=50),
     )
     st.plotly_chart(fig_cum, use_container_width=True)
 
-    # Tabla de retorno total al final del período
-    ret_table = cum.iloc[-1].reset_index()
-    ret_table.columns = ["Ticker","Retorno (%)"]
-    ret_table["Retorno (%)"] = ret_table["Retorno (%)"].round(2)
-    st.dataframe(
-        ret_table.sort_values("Retorno (%)", ascending=False),
-        use_container_width=True, hide_index=True
-    )
+    # Tabla de retornos totales — compacta, dentro de expander
+    with st.expander("📋 Retorno total por ticker al cierre del período", expanded=False):
+        ret_raw = cum.iloc[-1].reset_index()
+        ret_raw.columns = ["Ticker","Retorno (%)"]
+        ret_raw["Retorno (%)"] = ret_raw["Retorno (%)"].round(2)
+        ret_raw = ret_raw.merge(
+            positions[["ticker","asset_class","sector","industry"]],
+            left_on="Ticker", right_on="ticker", how="left"
+        ).drop(columns=["ticker"])
+        ret_raw = ret_raw.sort_values("Retorno (%)", ascending=False)
+        st.dataframe(
+            ret_raw.style.applymap(
+                lambda v: "color: green" if isinstance(v, float) and v > 0
+                          else ("color: red" if isinstance(v, float) and v < 0 else ""),
+                subset=["Retorno (%)"]
+            ).format({"Retorno (%)": "{:+.2f}%"}),
+            use_container_width=True,
+            hide_index=True
+        )
+
 else:
     st.warning("No se pudieron cargar datos históricos.")
 
 st.divider()
 
 
-# ── TABLA DE POSICIONES ────────────────────────────────────────────────────────
-
-st.subheader("Posiciones")
-
-table = positions[[
-    "ticker","asset_class","sector","industry",
-    "shares","current_price","market_value","cost_basis","pl_usd","pl_pct","weight"
-]].sort_values("pl_usd", ascending=False).copy()
-
-table.columns = [
-    "Ticker","Class","Sector","Industry",
-    "Acc.","Precio","Valor","Costo","P&L $","P&L %","Peso %"
-]
-
-def color_pl(val):
-    if isinstance(val, float) and val > 0: return "color: green"
-    elif isinstance(val, float) and val < 0: return "color: red"
-    return ""
-
-st.dataframe(
-    table.style
-        .format({
-            "Acc.":    "{:.3f}",
-            "Precio":  "${:.2f}",
-            "Valor":   "${:.0f}",
-            "Costo":   "${:.0f}",
-            "P&L $":   "${:+.0f}",
-            "P&L %":   "{:+.1f}%",
-            "Peso %":  "{:.1f}%",
-        })
-        .map(color_pl, subset=["P&L $","P&L %"]),
-    column_config={
-        "Ticker":   st.column_config.TextColumn("Ticker",   width="small"),
-        "Class":    st.column_config.TextColumn("Class",    width="small"),
-        "Sector":   st.column_config.TextColumn("Sector",   width="medium"),
-        "Industry": st.column_config.TextColumn("Industry", width="medium"),
-        "Acc.":     st.column_config.TextColumn("Acc.",     width="small"),
-        "Precio":   st.column_config.TextColumn("Precio",   width="small"),
-        "Valor":    st.column_config.TextColumn("Valor",    width="small"),
-        "Costo":    st.column_config.TextColumn("Costo",    width="small"),
-        "P&L $":    st.column_config.TextColumn("P&L $",    width="small"),
-        "P&L %":    st.column_config.TextColumn("P&L %",    width="small"),
-        "Peso %":   st.column_config.TextColumn("Peso %",   width="small"),
-    },
-    use_container_width=True,
-    hide_index=True,
-    height=560
-)
-
-st.divider()
-
-
-# ── ASIGNACIÓN — 3 DONUTS (PLOTLY) ────────────────────────────────────────────
-
-st.subheader("Asignación del portfolio")
-
-fig_alloc = make_subplots(
-    rows=1, cols=3,
-    specs=[[{"type": "pie"}, {"type": "pie"}, {"type": "pie"}]],
-    subplot_titles=["Asset Class", "Sector", "Industry"]
-)
-
-# Paleta de colores auto-asignada por categoría
-def pie_colors(labels, color_map):
-    return [color_map.get(l, "#BDBDBD") for l in labels]
-
-ASSET_COLORS = {"ETF": "#185FA5", "Equity": "#534AB7"}
-INDUSTRY_COLORS = {
-    "Semiconductor Equipment": "#7C4DFF",
-    "Nasdaq 100":              "#3D5AFE",
-    "S&P 500":                 "#43A047",
-    "Semiconductors":          "#651FFF",
-    "Pharmaceuticals":         "#E91E63",
-    "Precious Metals":         "#FFB300",
-    "Global ex-US":            "#1565C0",
-    "Electrical Equipment":    "#546E7A",
-    "Developed Markets":       "#1976D2",
-    "Gov & Corp Bonds":        "#78909C",
-    "Emerging Markets":        "#0288D1",
-    "Consumer Staples":        "#00897B",
-    "Banks":                   "#455A64",
-    "Energy Sector":           "#F57C00",
-    "Other":                   "#BDBDBD",
-}
-
-for col_idx, (group_col, color_map, hover_extra) in enumerate([
-    ("asset_class", ASSET_COLORS,    ""),
-    ("sector",      SECTOR_COLORS,   ""),
-    ("industry",    INDUSTRY_COLORS, ""),
-], start=1):
-    grp  = positions.groupby(group_col)["market_value"].sum().reset_index()
-    grp.columns = ["label","value"]
-    fig_alloc.add_trace(
-        go.Pie(
-            labels   = grp["label"],
-            values   = grp["value"].round(0),
-            name     = group_col,
-            hole     = 0.42,
-            marker   = dict(colors=pie_colors(grp["label"].tolist(), color_map)),
-            textinfo = "percent",
-            hovertemplate=(
-                "<b>%{label}</b><br>"
-                "$%{value:,.0f}<br>"
-                "%{percent}<extra></extra>"
-            ),
-        ),
-        row=1, col=col_idx
-    )
-
-fig_alloc.update_layout(
-    height      = 380,
-    showlegend  = True,
-    legend      = dict(orientation="v", font=dict(size=10)),
-    margin      = dict(l=10, r=10, t=50, b=10),
-)
-st.plotly_chart(fig_alloc, use_container_width=True)
-
-st.divider()
-
-
-# ── P&L POR POSICIÓN (PLOTLY) ─────────────────────────────────────────────────
+# ── 5. P&L POR POSICIÓN (PLOTLY) ─────────────────────────────────────────────
 
 st.subheader("P&L por posición")
 
-pl_sorted = positions.sort_values("pl_usd").copy()
-pl_colors = ["#3B6D11" if v >= 0 else "#A32D2D" for v in pl_sorted["pl_usd"]]
+pl_sorted  = positions.sort_values("pl_usd").copy()
+pl_colors  = ["#3B6D11" if v >= 0 else "#A32D2D" for v in pl_sorted["pl_usd"]]
 
 fig_pl = go.Figure(go.Bar(
-    x            = pl_sorted["pl_usd"].round(2),
-    y            = pl_sorted["ticker"],
-    orientation  = "h",
-    marker       = dict(color=pl_colors),
-    customdata   = pl_sorted[["pl_pct","market_value","cost_basis","sector","industry"]].values,
+    x           = pl_sorted["pl_usd"].round(2),
+    y           = pl_sorted["ticker"],
+    orientation = "h",
+    marker      = dict(color=pl_colors),
+    customdata  = pl_sorted[["pl_pct","market_value","cost_basis","sector","industry"]].values,
     hovertemplate=(
         "<b>%{y}</b><br>"
-        "P&L:         $%{x:+,.0f}<br>"
-        "P&L %:       %{customdata[0]:+.1f}%<br>"
+        "P&L:          $%{x:+,.0f}<br>"
+        "P&L %:        %{customdata[0]:+.1f}%<br>"
         "Valor actual: $%{customdata[1]:,.0f}<br>"
         "Costo base:   $%{customdata[2]:,.0f}<br>"
         "Sector:       %{customdata[3]}<br>"
@@ -443,18 +459,18 @@ fig_pl = go.Figure(go.Bar(
 ))
 fig_pl.add_vline(x=0, line_color="gray", line_dash="dash", opacity=0.4)
 fig_pl.update_layout(
-    height   = max(350, len(pl_sorted) * 30),
-    xaxis    = dict(title="P&L (USD)"),
-    yaxis    = dict(title=""),
+    height     = max(350, len(pl_sorted) * 30),
+    xaxis      = dict(title="P&L (USD)"),
+    yaxis      = dict(title=""),
     showlegend = False,
-    margin   = dict(l=80, r=20, t=20, b=50),
+    margin     = dict(l=80, r=20, t=20, b=50),
 )
 st.plotly_chart(fig_pl, use_container_width=True)
 
 st.divider()
 
 
-# ── EVOLUCIÓN DEL PATRIMONIO ───────────────────────────────────────────────────
+# ── 6. EVOLUCIÓN DEL PATRIMONIO ───────────────────────────────────────────────
 
 st.subheader("📈 Evolución del patrimonio")
 snapshots = load_snapshots()
@@ -503,44 +519,68 @@ with st.sidebar:
 
     st.divider()
     st.header("➕ Añadir posición")
+
     with st.form("nueva_posicion"):
         ticker_new = st.text_input("Ticker", placeholder="AAPL").upper().strip()
 
-        # Opciones de clasificación derivadas del dict existente + "Other"
-        ac_opts  = sorted({v["asset_class"] for v in CLASSIFICATION.values()})
-        sec_opts = sorted({v["sector"]      for v in CLASSIFICATION.values()}) + ["Other"]
-        ind_opts = sorted({v["industry"]    for v in CLASSIFICATION.values()}) + ["Other"]
-
-        # Si el ticker ya está en el dict, informar al usuario
+        # Mostrar clasificación automática si el ticker ya existe
         if ticker_new in CLASSIFICATION:
             known = CLASSIFICATION[ticker_new]
-            st.info(
-                f"Clasificación automática: "
-                f"**{known['asset_class']}** · {known['sector']} · {known['industry']}"
+            st.success(
+                f"✅ Clasificación automática: "
+                f"{known['asset_class']} · {known['sector']} · {known['industry']}"
             )
 
-        asset_class_new = st.selectbox("Asset Class", ac_opts)
-        sector_new      = st.selectbox("Sector",      sec_opts)
-        industry_new    = st.selectbox("Industry",    ind_opts)
-        shares_new      = st.number_input("Acciones",        min_value=0.001, step=0.001, format="%.3f")
-        avg_price_new   = st.number_input("Precio medio ($)", min_value=0.01,  step=0.01)
-        date_new        = st.date_input("Fecha de compra", value=date.today())
-        submitted       = st.form_submit_button("Añadir")
+        st.caption("Clasificación — elige de la lista o escribe una nueva:")
+
+        ac_opts  = sorted({v["asset_class"] for v in CLASSIFICATION.values()})
+        sec_opts = sorted({v["sector"]      for v in CLASSIFICATION.values()})
+        ind_opts = sorted({v["industry"]    for v in CLASSIFICATION.values()})
+
+        col1, col2 = st.columns(2)
+        with col1:
+            asset_class_sel    = st.selectbox("Asset Class", ac_opts)
+            asset_class_custom = st.text_input("Nueva Asset Class", "",
+                                               help="Rellena solo si quieres una nueva no listada")
+        with col2:
+            sector_sel    = st.selectbox("Sector", sec_opts)
+            sector_custom = st.text_input("Nuevo Sector", "",
+                                          help="Rellena solo si quieres un nuevo sector")
+
+        industry_sel    = st.selectbox("Industry", ind_opts)
+        industry_custom = st.text_input("Nueva Industry", "",
+                                        help="Rellena solo si quieres una nueva industria")
+
+        shares_new    = st.number_input("Acciones",         min_value=0.001, step=0.001, format="%.3f")
+        avg_price_new = st.number_input("Precio medio ($)", min_value=0.01,  step=0.01)
+        date_new      = st.date_input("Fecha de compra", value=date.today())
+        submitted     = st.form_submit_button("Añadir")
 
         if submitted and ticker_new and shares_new > 0 and avg_price_new > 0:
+            # Si el ticker está en el dict, usar clasificación automática
+            # Si no, usar lo que el usuario eligió (custom override el selectbox)
+            if ticker_new in CLASSIFICATION:
+                ac  = CLASSIFICATION[ticker_new]["asset_class"]
+                sec = CLASSIFICATION[ticker_new]["sector"]
+                ind = CLASSIFICATION[ticker_new]["industry"]
+            else:
+                ac  = asset_class_custom.strip() or asset_class_sel
+                sec = sector_custom.strip()       or sector_sel
+                ind = industry_custom.strip()     or industry_sel
+
             new_row = pd.DataFrame([{
                 "ticker":      ticker_new,
                 "shares":      shares_new,
                 "avg_price":   avg_price_new,
                 "date_added":  date_new.strftime("%Y-%m-%d"),
-                "category":    sector_new,       # compatibilidad con CSV anterior
-                "asset_class": asset_class_new,
-                "sector":      sector_new,
-                "industry":    industry_new,
+                "category":    sec,   # compatibilidad CSV anterior
+                "asset_class": ac,
+                "sector":      sec,
+                "industry":    ind,
             }])
             updated = pd.concat([load_positions(), new_row], ignore_index=True)
             save_positions(updated)
-            st.success(f"✅ {ticker_new} añadido")
+            st.success(f"✅ {ticker_new} añadido — {ac} · {sec} · {ind}")
             st.cache_data.clear()
             st.rerun()
 
