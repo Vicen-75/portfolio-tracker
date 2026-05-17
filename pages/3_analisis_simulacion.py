@@ -3,6 +3,7 @@ import yfinance as yf
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
 import seaborn as sns
 from scipy.optimize import minimize
 
@@ -97,7 +98,6 @@ def calc_sharpe(tickers, weights_dict, mean_ret, cov):
 
 def save_decision(operations, period, predicted_return, predicted_vol,
                   predicted_sharpe, cash_invested, notes):
-    """Guarda una decisión de inversión en decisions.csv."""
     try:
         df = pd.read_csv("data/decisions.csv")
     except (FileNotFoundError, pd.errors.EmptyDataError):
@@ -107,7 +107,6 @@ def save_decision(operations, period, predicted_return, predicted_vol,
             "cash_invested","notes",
             "actual_return","actual_vol","actual_sharpe","review_date"
         ])
-
     new_id  = int(df["id"].max() + 1) if not df.empty else 1
     new_row = pd.DataFrame([{
         "id":               new_id,
@@ -119,14 +118,10 @@ def save_decision(operations, period, predicted_return, predicted_vol,
         "predicted_sharpe": round(predicted_sharpe, 2),
         "cash_invested":    round(abs(cash_invested), 2),
         "notes":            notes,
-        "actual_return":    None,
-        "actual_vol":       None,
-        "actual_sharpe":    None,
-        "review_date":      None,
+        "actual_return":    None, "actual_vol": None,
+        "actual_sharpe":    None, "review_date": None,
     }])
-
-    updated = pd.concat([df, new_row], ignore_index=True)
-    updated.to_csv("data/decisions.csv", index=False)
+    pd.concat([df, new_row], ignore_index=True).to_csv("data/decisions.csv", index=False)
 
 
 # ── CARGA INICIAL ──────────────────────────────────────────────────────────────
@@ -322,21 +317,16 @@ st.caption(
 fig1, ax1 = plt.subplots(figsize=(10, 5))
 sc = ax1.scatter(port_v_mc, port_r_mc, c=port_s_mc, cmap="viridis", alpha=0.4, s=10)
 plt.colorbar(sc, ax=ax1, label="Sharpe Ratio")
-
-ax1.scatter(opt_v_scipy, opt_r_scipy,
-            color="gold", s=180, zorder=6,
+ax1.scatter(opt_v_scipy, opt_r_scipy, color="gold", s=180, zorder=6,
             label=f"Max Sharpe — scipy (Sharpe {opt_s_scipy:.2f})")
 ax1.scatter(port_v_mc[minv_idx], port_r_mc[minv_idx],
             color="cyan", s=150, zorder=5, label="Min Volatilidad")
-
 if cur_v is not None and cur_r is not None:
     ax1.scatter(cur_v, cur_r, color="#00BFFF", s=220, marker="D", zorder=6,
                 label=f"Real actual (Sharpe {cur_sharpe:.2f})")
-
 if has_trades and sim_v is not None and sim_r is not None:
     ax1.scatter(sim_v, sim_r, color="#00FF88", s=220, marker="*", zorder=6,
                 label=f"Hipotético (Sharpe {sim_sharpe:.2f})")
-
 ax1.set_xlabel("Volatilidad anualizada (Riesgo)")
 ax1.set_ylabel("Retorno anualizado")
 ax1.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"{x:.1%}"))
@@ -346,6 +336,7 @@ ax1.legend(fontsize=8)
 sns.despine()
 plt.tight_layout()
 st.pyplot(fig1)
+plt.close(fig1)
 
 st.divider()
 
@@ -360,8 +351,8 @@ if not has_trades:
 # ── 3. COMPARATIVA ────────────────────────────────────────────────────────────
 
 st.subheader("Comparativa: actual vs hipotético")
-
 col_a, col_b = st.columns(2)
+
 with col_a:
     st.markdown("#### 🔵 Portfolio actual")
     m1, m2, m3 = st.columns(3)
@@ -440,22 +431,85 @@ st.dataframe(
 st.divider()
 
 
-# ── 5. CAMBIO DE PESOS ─────────────────────────────────────────────────────────
+# ── 5. LOLLIPOP: PESOS ACTUALES VS HIPOTÉTICOS ────────────────────────────────
 
-st.subheader("Cambio de pesos")
-changed = comp_df[comp_df["Δ Peso (pp)"] != 0].sort_values("Δ Peso (pp)")
+st.subheader("Pesos actuales vs hipotéticos")
+st.caption(
+    "● Azul = peso actual.  "
+    "◆ Verde = aumenta.  ◆ Rojo = disminuye.  "
+    "● Gris = sin cambio.  "
+    "Los números junto al diamante muestran el cambio en puntos porcentuales."
+)
 
-if not changed.empty:
-    fig2, ax2 = plt.subplots(figsize=(9, max(3, len(changed) * 0.5)))
-    colors = ["#3B6D11" if v > 0 else "#A32D2D" for v in changed["Δ Peso (pp)"]]
-    ax2.barh(changed["Ticker"], changed["Δ Peso (pp)"], color=colors)
-    ax2.axvline(0, color="gray", linewidth=0.8, linestyle="--")
-    ax2.set_xlabel("Cambio en peso (puntos porcentuales)")
-    ax2.set_title("Impacto de las operaciones en la asignación del portfolio")
-    plt.tight_layout()
-    st.pyplot(fig2)
-else:
-    st.info("Las operaciones no producen cambios significativos en la asignación.")
+# Ordenar: primero los que cambian (por magnitud del cambio desc), luego los estables
+plot_df = comp_df.copy()
+plot_df["abs_delta"] = plot_df["Δ Peso (pp)"].abs()
+plot_df = plot_df.sort_values(
+    ["abs_delta", "Peso actual %"],
+    ascending=[True, True]   # ascending=True → los más grandes quedan arriba en barh
+)
+
+n_rows = len(plot_df)
+fig2, ax2 = plt.subplots(figsize=(10, max(5, n_rows * 0.52)))
+
+for i, (_, row) in enumerate(plot_df.iterrows()):
+    curr    = row["Peso actual %"]
+    hypo    = row["Peso hipotético %"]
+    delta   = row["Δ Peso (pp)"]
+    changed = row["abs_delta"] > 0.05
+
+    if changed:
+        color = "#3B6D11" if delta > 0 else "#A32D2D"
+
+        # Línea que conecta peso actual con hipotético
+        ax2.plot([curr, hypo], [i, i],
+                 color=color, linewidth=2.5, alpha=0.75, zorder=2)
+
+        # Punto actual (círculo azul sólido)
+        ax2.scatter(curr, i,
+                    color="#185FA5", s=110, zorder=4, linewidths=0)
+
+        # Punto hipotético (diamante coloreado)
+        ax2.scatter(hypo, i,
+                    color=color, s=160, marker="D", zorder=5, linewidths=0)
+
+        # Etiqueta del cambio
+        offset = 0.6 if delta > 0 else -0.6
+        ha     = "left" if delta > 0 else "right"
+        ax2.annotate(
+            f"{delta:+.1f}pp",
+            xy=(hypo, i),
+            xytext=(hypo + offset, i),
+            fontsize=8.5, color=color,
+            va="center", ha=ha, fontweight="bold"
+        )
+    else:
+        # Sin cambio: punto gris
+        ax2.scatter(curr, i, color="#888780", s=80, alpha=0.55, zorder=3)
+
+# Ejes y estilos
+ax2.set_yticks(range(n_rows))
+ax2.set_yticklabels(plot_df["Ticker"].tolist(), fontsize=10)
+ax2.set_xlabel("Peso en portfolio (%)", fontsize=10)
+
+max_x = max(plot_df["Peso hipotético %"].max(), plot_df["Peso actual %"].max())
+ax2.set_xlim(-0.5, max_x + 7)
+
+ax2.set_title("Distribución de pesos: actual vs hipotético", fontsize=12)
+ax2.grid(axis="x", alpha=0.18, linewidth=0.6)
+
+legend_elems = [
+    mpatches.Patch(color="#185FA5", label="Peso actual  ●"),
+    mpatches.Patch(color="#3B6D11", label="Aumenta  ◆"),
+    mpatches.Patch(color="#A32D2D", label="Disminuye  ◆"),
+    mpatches.Patch(color="#888780", label="Sin cambio  ●"),
+]
+ax2.legend(handles=legend_elems, loc="lower right", fontsize=9,
+           framealpha=0.8)
+sns.despine()
+plt.tight_layout()
+st.pyplot(fig2)
+plt.close(fig2)
 
 st.divider()
 
@@ -475,15 +529,17 @@ if sim_sharpe and sim_r and sim_v:
 
     decision_note = st.text_area(
         "Tesis de inversión (¿por qué tomas esta decisión?)",
-        placeholder="Ej: Refuerzo JNJ porque el modelo lo señala como el activo más eficiente. "
-                    "Añado XLE para diversificar en energía. Objetivo: mejorar Sharpe de 2.30 a 2.51.",
+        placeholder=(
+            "Ej: Refuerzo JNJ porque el modelo lo señala como el activo más eficiente. "
+            "Añado XLE para diversificar en energía. Objetivo: mejorar Sharpe de 2.30 a 2.51."
+        ),
         height=100
     )
 
-    col_metrics = st.columns(3)
-    col_metrics[0].metric("Sharpe predicho",   f"{sim_sharpe:.2f}")
-    col_metrics[1].metric("Retorno predicho",  f"{sim_r:.1%}")
-    col_metrics[2].metric("Volatilidad pred.", f"{sim_v:.1%}")
+    col_m = st.columns(3)
+    col_m[0].metric("Sharpe predicho",    f"{sim_sharpe:.2f}")
+    col_m[1].metric("Retorno predicho",   f"{sim_r:.1%}")
+    col_m[2].metric("Volatilidad pred.",  f"{sim_v:.1%}")
 
     if st.button("💾 Guardar decisión en el diario"):
         save_decision(

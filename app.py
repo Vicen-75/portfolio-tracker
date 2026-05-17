@@ -2,6 +2,7 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import matplotlib.pyplot as plt
+import plotly.graph_objects as go
 import seaborn as sns
 from datetime import date
 
@@ -27,8 +28,7 @@ def load_snapshots():
         return df.sort_values("date").reset_index(drop=True)
     except (FileNotFoundError, pd.errors.EmptyDataError):
         return pd.DataFrame(
-            columns=["date","total_value","total_invested",
-                     "total_pl","total_pl_pct","notes"])
+            columns=["date","total_value","total_invested","total_pl","total_pl_pct","notes"])
 
 def save_snapshot(total_value, total_invested, total_pl, total_pl_pct, notes=""):
     snapshots = load_snapshots()
@@ -131,12 +131,18 @@ def color_pl(val):
 st.dataframe(
     table.style
         .format({
-            "Acciones": "{:.3f}", "Precio actual": "${:.2f}",
-            "Valor": "${:.0f}", "Costo base": "${:.0f}",
-            "P&L $": "${:+.0f}", "P&L %": "{:+.1f}%", "Peso %": "{:.1f}%",
+            "Acciones":      "{:.3f}",
+            "Precio actual": "${:.2f}",
+            "Valor":         "${:.0f}",
+            "Costo base":    "${:.0f}",
+            "P&L $":         "${:+.0f}",
+            "P&L %":         "{:+.1f}%",
+            "Peso %":        "{:.1f}%",
         })
         .map(color_pl, subset=["P&L $","P&L %"]),
-    use_container_width=True, hide_index=True
+    use_container_width=True,
+    hide_index=True,
+    height=560          # muestra ~15 filas sin scroll
 )
 
 st.divider()
@@ -155,43 +161,151 @@ with col_left:
             startangle=90, colors=COLORS[:len(cat_data)])
     plt.tight_layout()
     st.pyplot(fig1)
+    plt.close(fig1)
 
 with col_right:
     st.subheader("P&L por posición (USD)")
-    pl_data = positions.sort_values("pl_usd")
+    pl_data    = positions.sort_values("pl_usd")
     bar_colors = ["#3B6D11" if v >= 0 else "#A32D2D" for v in pl_data["pl_usd"]]
-    fig2, ax2 = plt.subplots(figsize=(5, 4))
+    fig2, ax2  = plt.subplots(figsize=(5, 4))
     ax2.barh(pl_data["ticker"], pl_data["pl_usd"], color=bar_colors)
     ax2.axvline(0, color="gray", linewidth=0.8, linestyle="--")
     ax2.set_xlabel("P&L (USD)")
     plt.tight_layout()
     st.pyplot(fig2)
+    plt.close(fig2)
 
 st.divider()
 
 
-# ── RETORNOS ACUMULADOS ────────────────────────────────────────────────────────
+# ── RETORNOS ACUMULADOS (PLOTLY — INTERACTIVO) ────────────────────────────────
 
 st.subheader("Retornos acumulados (1 año)")
-st.caption("Evolución del precio de cada posición en los últimos 12 meses.")
 
 history = get_price_history(tickers)
-if not history.empty:
-    cum    = (history / history.iloc[0] - 1) * 100
-    melted = cum.reset_index().melt("Date", var_name="Ticker", value_name="Retorno (%)")
-    fig3, ax3 = plt.subplots(figsize=(10, 4))
-    sns.lineplot(data=melted, x="Date", y="Retorno (%)", hue="Ticker", ax=ax3)
-    ax3.axhline(0, color="gray", linewidth=0.8, linestyle="--")
-    ax3.set_title("Retornos acumulados — 1 año")
-    sns.despine()
-    plt.tight_layout()
-    st.pyplot(fig3)
 
+if not history.empty:
+    cum = (history / history.iloc[0] - 1) * 100
+
+    # Mapa ticker → categoría
+    ticker_cat = dict(zip(positions["ticker"], positions["category"]))
+
+    # Colores por categoría
+    CAT_COLORS = {
+        "ETF": "#185FA5", "Tech": "#534AB7", "Salud": "#D4537E",
+        "Materiales": "#BA7517", "Industrial": "#888780",
+        "Consumo": "#1D9E75", "Financiero": "#5F5E5A", "Otro": "#888888"
+    }
+
+    # Controles
+    col_view, col_filter = st.columns([1, 3])
+    with col_view:
+        view = st.radio(
+            "Vista",
+            ["Individual", "Por categoría"],
+            horizontal=True,
+            label_visibility="collapsed"
+        )
+
+    fig_cum = go.Figure()
+
+    if view == "Individual":
+        with col_filter:
+            selected = st.multiselect(
+                "Filtrar tickers",
+                options=sorted(cum.columns.tolist()),
+                default=sorted(cum.columns.tolist()),
+                label_visibility="collapsed"
+            )
+
+        for ticker in selected:
+            if ticker in cum.columns:
+                cat   = ticker_cat.get(ticker, "Otro")
+                color = CAT_COLORS.get(cat, "#888888")
+                fig_cum.add_trace(go.Scatter(
+                    x    = cum.index,
+                    y    = cum[ticker].round(2),
+                    name = ticker,
+                    mode = "lines",
+                    line = dict(color=color, width=1.8),
+                    hovertemplate = (
+                        f"<b>{ticker}</b> ({cat})<br>"
+                        "%{x|%d %b %Y}<br>"
+                        "<b>%{y:.1f}%</b><extra></extra>"
+                    )
+                ))
+    else:
+        # Vista por categoría: retorno medio ponderado por capitalización
+        cat_groups = {}
+        for col in cum.columns:
+            cat = ticker_cat.get(col, "Otro")
+            if cat not in cat_groups:
+                cat_groups[cat] = []
+            cat_groups[cat].append(col)
+
+        for cat, cat_tickers in sorted(cat_groups.items()):
+            tickers_in = [t for t in cat_tickers if t in cum.columns]
+            if not tickers_in:
+                continue
+            # Media simple de los retornos de la categoría
+            cat_avg = cum[tickers_in].mean(axis=1).round(2)
+            label   = f"{cat} ({', '.join(tickers_in)})"
+            fig_cum.add_trace(go.Scatter(
+                x    = cat_avg.index,
+                y    = cat_avg,
+                name = cat,
+                mode = "lines",
+                line = dict(color=CAT_COLORS.get(cat, "#888888"), width=2.5),
+                hovertemplate = (
+                    f"<b>{cat}</b><br>"
+                    f"<span style='font-size:11px'>{', '.join(tickers_in)}</span><br>"
+                    "%{x|%d %b %Y}<br>"
+                    "<b>%{y:.1f}%</b><extra></extra>"
+                )
+            ))
+
+    # Línea en 0
+    fig_cum.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.4)
+
+    # Layout con selector de rango temporal
+    fig_cum.update_layout(
+        xaxis=dict(
+            rangeselector=dict(
+                buttons=[
+                    dict(count=1,  label="1M",  step="month", stepmode="backward"),
+                    dict(count=3,  label="3M",  step="month", stepmode="backward"),
+                    dict(count=6,  label="6M",  step="month", stepmode="backward"),
+                    dict(count=1,  label="1A",  step="year",  stepmode="backward"),
+                    dict(step="all", label="Todo"),
+                ],
+                bgcolor="#f0f0f0",
+            ),
+            type="date",
+            rangeslider=dict(visible=False),
+        ),
+        yaxis=dict(title="Retorno (%)"),
+        hovermode="x unified",
+        height=460,
+        legend=dict(
+            orientation="h",
+            yanchor="bottom", y=1.02,
+            xanchor="right",  x=1,
+            font=dict(size=11)
+        ),
+        margin=dict(l=50, r=20, t=80, b=50),
+    )
+
+    st.plotly_chart(fig_cum, use_container_width=True)
+
+    # Tabla de retorno total
     ret_table = cum.iloc[-1].reset_index()
     ret_table.columns = ["Ticker","Retorno (%)"]
     ret_table["Retorno (%)"] = ret_table["Retorno (%)"].round(2)
-    st.dataframe(ret_table.sort_values("Retorno (%)", ascending=False),
-                 use_container_width=True, hide_index=True)
+    st.dataframe(
+        ret_table.sort_values("Retorno (%)", ascending=False),
+        use_container_width=True,
+        hide_index=True
+    )
 else:
     st.warning("No se pudieron cargar datos históricos.")
 
@@ -206,31 +320,35 @@ snapshots = load_snapshots()
 if len(snapshots) < 2:
     st.info("Guarda tu primer snapshot hoy. El gráfico aparecerá con al menos dos snapshots.")
 else:
-    fig4, ax4 = plt.subplots(figsize=(10, 4))
-    ax4.plot(snapshots["date"], snapshots["total_value"],
+    fig3, ax3 = plt.subplots(figsize=(10, 4))
+    ax3.plot(snapshots["date"], snapshots["total_value"],
              color="#185FA5", linewidth=2, marker="o", label="Valor del portfolio")
-    ax4.plot(snapshots["date"], snapshots["total_invested"],
+    ax3.plot(snapshots["date"], snapshots["total_invested"],
              color="#888780", linewidth=1.5, linestyle="--", marker="o", label="Capital invertido")
-    ax4.fill_between(snapshots["date"], snapshots["total_invested"], snapshots["total_value"],
+    ax3.fill_between(snapshots["date"], snapshots["total_invested"], snapshots["total_value"],
                      where=(snapshots["total_value"] >= snapshots["total_invested"]),
                      alpha=0.15, color="#3B6D11", label="Rentabilidad del mercado")
-    ax4.fill_between(snapshots["date"], snapshots["total_invested"], snapshots["total_value"],
+    ax3.fill_between(snapshots["date"], snapshots["total_invested"], snapshots["total_value"],
                      where=(snapshots["total_value"] < snapshots["total_invested"]),
                      alpha=0.15, color="#A32D2D")
-    ax4.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"${x:,.0f}"))
-    ax4.set_title("Crecimiento del patrimonio mes a mes")
-    ax4.legend()
+    ax3.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"${x:,.0f}"))
+    ax3.set_title("Crecimiento del patrimonio mes a mes")
+    ax3.legend()
     plt.tight_layout()
-    st.pyplot(fig4)
+    st.pyplot(fig3)
+    plt.close(fig3)
 
     snap_table = snapshots[["date","total_value","total_invested","total_pl","total_pl_pct","notes"]].copy()
     snap_table.columns = ["Fecha","Valor total","Capital invertido","P&L $","P&L %","Notas"]
     st.dataframe(
         snap_table.style.format({
-            "Valor total": "${:,.0f}", "Capital invertido": "${:,.0f}",
-            "P&L $": "${:+,.0f}", "P&L %": "{:+.1f}%",
+            "Valor total":       "${:,.0f}",
+            "Capital invertido": "${:,.0f}",
+            "P&L $":             "${:+,.0f}",
+            "P&L %":             "{:+.1f}%",
         }),
-        use_container_width=True, hide_index=True
+        use_container_width=True,
+        hide_index=True
     )
 
 

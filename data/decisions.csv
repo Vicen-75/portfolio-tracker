@@ -1,0 +1,2 @@
+id,date,operations,period,predicted_return,predicted_vol,predicted_sharpe,cash_invested,notes,actual_return,actual_vol,actual_sharpe,review_date
+1,2026-05-17,Comprar JNJ 1.0acc · Comprar TSM 1.0acc · Comprar LLY 0.25acc · Comprar XLE 2.0acc,1y,0.4101,0.1632,2.51,1001.17,"Refuerzo Sharpe Ratio aumentando posiciones en JNJ (1 acción - menos volatilidad) y TSM (1 acción - más retorno). Aumento variabilidad adquiriendo 2 ETF de Energía (XLE) y aumento retorno con adquisición de 0.25 acciones de LLY. Total aduquirido aproximadamente. $1,000.",,,,
