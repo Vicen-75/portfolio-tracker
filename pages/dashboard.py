@@ -6,7 +6,6 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import date
 
-st.set_page_config(page_title="Portfolio Tracker", page_icon="📈", layout="wide")
 
 
 # ── CLASIFICACIÓN ──────────────────────────────────────────────────────────────
